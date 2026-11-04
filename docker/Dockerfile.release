@@ -1,0 +1,49 @@
+# Trigpoint release build. Two stages:
+#   build   — pgvector's image plus the server headers and a compiler; builds the extension (release variant: no page
+#             hooks, no result-changing diagnostics; TEST_HOOKS=1 for the test image) and packs it as
+#             postgresql-${PG_MAJOR}-trigpoint_${VERSION}_${ARCH}.deb (dpkg-deb; depends on postgresql-${PG_MAJOR}; pgvector >= 0.8
+#             is a Recommends, since pgvector's image compiles it from source and has no package for it)
+#   release — pgvector/pgvector:pg${PG_MAJOR} plus that .deb: no compiler, no other extensions
+#
+#   docker build -f docker/Dockerfile.release --build-arg PG_MAJOR=17 -t trigpoint/postgres:0.5-pg17 .
+#   docker build -f docker/Dockerfile.release --build-arg PG_MAJOR=17 --target deb -o dist .     # the .deb alone
+#   docker build -f docker/Dockerfile.release --build-arg TEST_HOOKS=1 -t trigpoint-postgres-test:pg17 .   # for the suites
+ARG PG_MAJOR=17
+# The base images are pinned by digest: the tag pgvector/pgvector:pg<m> is rebuilt upstream, and two builds of the same
+# tree on different digests gave different indexes (most likely through the toolchain).
+# These are the digests 0.5 was tested on (2026-11-04). To move: update all three, then rerun the matrix and no-drift.
+FROM pgvector/pgvector:pg16@sha256:0dd3149a06e4579a0d70d8fef9945636cd514005e7237deb27f9b67886f8dc4f AS base-16
+FROM pgvector/pgvector:pg17@sha256:7d0a41464797aeb9862dfdc0bbf1526b82cfd324cdd8036df19e3545f4a9ccb8 AS base-17
+FROM pgvector/pgvector:pg18@sha256:c29f30688a9ad961691bdf0ec1650717cc132a5814619d80f80463d6e4c42e47 AS base-18
+FROM base-${PG_MAJOR} AS build
+ARG PG_MAJOR
+ARG VERSION=0.5.0
+ARG TEST_HOOKS=0
+RUN apt-get update && apt-get install -y --no-install-recommends \
+        build-essential clang git ca-certificates postgresql-server-dev-${PG_MAJOR} \
+    && rm -rf /var/lib/apt/lists/*
+WORKDIR /src
+COPY csrc /src/csrc
+COPY pgext /src/pgext
+RUN test -d csrc/hnswlib/hnswlib || git clone --depth 1 -q https://github.com/nmslib/hnswlib csrc/hnswlib
+RUN make -C pgext with_llvm=no CXX=clang++ TEST_HOOKS=${TEST_HOOKS} \
+    && make -C pgext install with_llvm=no DESTDIR=/out \
+    && rm -rf /out/usr/include
+# the package: everything `make install` put under /out, a control file, the licence and the changelog
+RUN ARCH=$(dpkg --print-architecture) && PKG=postgresql-${PG_MAJOR}-trigpoint && D=/deb/${PKG}_${VERSION}_${ARCH} \
+    && mkdir -p $D/DEBIAN /dist && cp -a /out/. $D/ \
+    && mkdir -p $D/usr/share/doc/$PKG && cp pgext/README.md $D/usr/share/doc/$PKG/ && cp pgext/CHANGELOG.md $D/usr/share/doc/$PKG/changelog \
+    && printf 'Package: %s\nVersion: %s\nSection: database\nPriority: optional\nArchitecture: %s\nDepends: postgresql-%s\nRecommends: postgresql-%s-pgvector (>= 0.8)\nMaintainer: Esteban Puello Fuentes\nDescription: Trigpoint vector index for PostgreSQL %s\n Sketch-routed, calibrated-cascade index access method for pgvector vectors%s.\n' \
+       "$PKG" "$VERSION" "$ARCH" "$PG_MAJOR" "$PG_MAJOR" "$PG_MAJOR" "$( [ "$TEST_HOOKS" = "1" ] && echo ' (test build: page hooks compiled in)' )" > $D/DEBIAN/control \
+    && dpkg-deb --build --root-owner-group $D /dist/ \
+    && ls -l /dist && dpkg-deb --info /dist/*.deb | head -12
+
+FROM scratch AS deb
+COPY --from=build /dist/ /
+
+FROM base-${PG_MAJOR}
+ARG PG_MAJOR
+COPY --from=build /dist/ /tmp/trigpoint/
+RUN dpkg -i /tmp/trigpoint/*.deb && rm -rf /tmp/trigpoint \
+    && su postgres -c "/usr/lib/postgresql/${PG_MAJOR}/bin/postgres --version" \
+    && ls /usr/share/postgresql/${PG_MAJOR}/extension/trigpoint.control

@@ -1,0 +1,65 @@
+# Trigpoint CI.
+# On push and pull request: the test image on PostgreSQL 16, 17 and 18 and the release image on 17, each running the
+# quick suites against a throwaway server (scripts/ci_release.sh). Nightly: the same plus the short soak, crash and
+# standby runs of the full loop.
+name: ci
+on:
+  push:
+    branches: ["**"]
+  pull_request:
+  schedule:
+    - cron: "17 3 * * *"
+  workflow_dispatch:
+
+jobs:
+  quick:
+    name: quick suites (PG ${{ matrix.pg }}, ${{ matrix.which }})
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - pg: 16
+            which: test
+          - pg: 17
+            which: test
+          - pg: 18
+            which: test
+          - pg: 17
+            which: release
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: venv
+        run: |
+          python -m venv .venv
+          .venv/bin/pip install -q "psycopg[binary]" numpy pytest
+      - name: suites
+        env:
+          PG_MAJOR: ${{ matrix.pg }}
+          WHICH: ${{ matrix.which }}
+        run: sh scripts/ci_release.sh
+
+  nightly:
+    name: nightly full loop
+    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    timeout-minutes: 180
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: venv
+        run: |
+          python -m venv .venv
+          .venv/bin/pip install -q "psycopg[binary]" numpy pytest
+      - name: test image, PG 17, every suite plus the soak, crash and standby scripts
+        env:
+          TP_FUZZ_ITER: "20000"
+        run: |
+          export WHICH=test
+          if [ -f scripts/ci.sh ]; then sh scripts/ci.sh; else sh scripts/ci_release.sh; fi

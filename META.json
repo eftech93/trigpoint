@@ -1,0 +1,48 @@
+{
+  "name": "trigpoint",
+  "abstract": "Sketch-routed, calibrated-cascade vector index for pgvector vectors",
+  "description": "A PostgreSQL index access method for pgvector's vector type: a per-point int8 PCA sketch with an HNSW router over the sketches, a calibrated or exact lower bound that prunes before heap fetches, one shared in-memory image per index generation, and a log of inserts and tombstones compacted by VACUUM. L2 and cosine operator classes; filtered scans in batches.",
+  "version": "0.5.0",
+  "maintainer": [
+    "Esteban Puello Fuentes"
+  ],
+  "license": "postgresql",
+  "provides": {
+    "trigpoint": {
+      "abstract": "Sketch-routed, calibrated-cascade vector index for pgvector vectors",
+      "file": "pgext/trigpoint--0.5.sql",
+      "docfile": "pgext/README.md",
+      "version": "0.5.0"
+    }
+  },
+  "prereqs": {
+    "runtime": {
+      "requires": {
+        "PostgreSQL": "16.0.0",
+        "vector": "0.8.0"
+      }
+    }
+  },
+  "resources": {
+    "repository": {
+      "type": "git",
+      "url": "https://github.com/eftech93/trigpoint.git",
+      "web": "https://github.com/eftech93/trigpoint"
+    },
+    "bugtracker": {
+      "web": "https://github.com/eftech93/trigpoint/issues"
+    }
+  },
+  "generated_by": "Esteban Puello Fuentes",
+  "meta-spec": {
+    "version": "1.0.0",
+    "url": "https://pgxn.org/meta/spec.txt"
+  },
+  "tags": [
+    "vector",
+    "nearest neighbour",
+    "index",
+    "pgvector",
+    "ann"
+  ]
+}

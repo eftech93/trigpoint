@@ -1,0 +1,6 @@
+# Trigpoint: sketch-routed, calibrated-cascade vector index (API spike)
+comment = 'Trigpoint: per-point sketch router + calibrated int8 cascade index for pgvector vectors'
+default_version = '0.5'
+module_pathname = '$libdir/trigpoint'
+relocatable = true
+requires = 'vector'
