@@ -41,7 +41,9 @@ CREATE INDEX t_v_tuned ON t USING trigpoint (v vector_l2_ops) WITH (cells = 256,
 ```
 
 The build runs on maintenance workers (`max_parallel_maintenance_workers`) and needs `maintenance_work_mem` large
-enough for the sampled vectors; in a container `dynamic_shared_memory_type = posix` needs `/dev/shm` to hold the image
+enough for every vector of the table in shared memory: about 6 bytes x rows x dimensions (n x D x 4 for the vectors
+plus working arrays; 30.1 GB at 5M x 1024), and the build refuses below that, with or without workers. In a container
+`dynamic_shared_memory_type = posix` needs `/dev/shm` to hold that area during the build and the image afterwards
 (`shm_size`). The three options that matter:
 
 | option | default | what it does |
@@ -98,7 +100,7 @@ heap fetches and the time split (core, route, heap).
   53400, or, with `trigpoint.on_shared_cap = private`, the backend reads a private copy (one image's memory per
   backend, a LOG line each time). `trigpoint.shared_image = off` makes every backend read a private copy always.
 - `trigpoint_backend_memory()` is this backend's resident size; a private copy shows up there.
-- The container's `/dev/shm` (compose `shm_size`) must hold every shared image plus the build's sample.
+- The container's `/dev/shm` (compose `shm_size`) must hold every shared image plus, during a build, the build's vector area.
 
 ## 5. Maintenance
 

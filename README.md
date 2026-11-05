@@ -21,13 +21,14 @@ core; `csrc/hnswlib` is cloned by the Dockerfile, or `git clone https://github.c
 ```
 CREATE EXTENSION vector;
 CREATE EXTENSION trigpoint;          -- or ALTER EXTENSION trigpoint UPDATE from 0.2 / 0.3 / 0.4
-CREATE INDEX t_ix ON t USING trigpoint (v vector_l2_ops) WITH (cells = 0);        -- cells = 0: automatic
-CREATE INDEX t_ix ON t USING trigpoint (v vector_cosine_ops);
+CREATE INDEX t_v_l2 ON t USING trigpoint (v vector_l2_ops) WITH (cells = 0);      -- L2, <->; cells = 0: automatic
+CREATE INDEX t_v_cos ON t USING trigpoint (v vector_cosine_ops);                    -- or cosine, <=>
 ```
 
 The build runs on maintenance workers (`max_parallel_maintenance_workers`) and needs `maintenance_work_mem`
-large enough for the vectors in shared memory; with `dynamic_shared_memory_type = posix` in a container,
-`/dev/shm` must hold the image (compose: `shm_size`). An index over an empty table works (a trivial model)
+large enough for the vectors in shared memory: about 6 bytes x rows x dimensions (30.1 GB at 5M x 1024), or the
+build refuses. With `dynamic_shared_memory_type = posix` in a container, `/dev/shm` must hold that area during the
+build and the image afterwards (compose: `shm_size`). An index over an empty table works (a trivial model)
 and refits itself at the first REINDEX; TRUNCATE and create-then-load are fine.
 
 PostgreSQL versions: 17 and 18 need nothing else. On 16 the cluster-wide image registry (the shared images of
