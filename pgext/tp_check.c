@@ -15,9 +15,9 @@
 
 #include <math.h>
 
-#include "access/generic_xlog.h"
 #include "access/htup_details.h"
 #include "access/relation.h"
+#include "access/xloginsert.h"
 #include "catalog/index.h"
 #include "commands/defrem.h"
 #include "funcapi.h"
@@ -504,16 +504,18 @@ trigpoint_debug_poke(PG_FUNCTION_ARGS)
 				value = PG_GETARG_INT32(3);
 	Buffer		buf;
 	Relation	index = debug_open(PG_GETARG_OID(0), blkno, offset, &buf);
-	GenericXLogState *state;
-	Page		page;
 
 	if (value < 0 || value > 255)
 		ereport(ERROR, (errcode(ERRCODE_INVALID_PARAMETER_VALUE), errmsg("trigpoint: byte value %d", value)));
 	LockBuffer(buf, BUFFER_LOCK_EXCLUSIVE);
-	state = GenericXLogStart(index);
-	page = GenericXLogRegisterBuffer(state, buf, GENERIC_XLOG_FULL_IMAGE);
-	((unsigned char *) page)[offset] = (unsigned char) value;
-	GenericXLogFinish(state);
+	/* not GenericXLog: it trusts pd_lower / pd_upper to skip the hole, and the byte may be one of them (a pd_lower
+	 * above pd_upper overran its copy); log the whole page as it now is instead */
+	START_CRIT_SECTION();
+	((unsigned char *) BufferGetPage(buf))[offset] = (unsigned char) value;
+	MarkBufferDirty(buf);
+	if (RelationNeedsWAL(index))
+		log_newpage_buffer(buf, false);
+	END_CRIT_SECTION();
 	UnlockReleaseBuffer(buf);
 	relation_close(index, RowExclusiveLock);
 	PG_RETURN_VOID();

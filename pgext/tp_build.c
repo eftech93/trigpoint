@@ -259,13 +259,14 @@ static int
 tp_free_generation_pages(Relation index, const TrigpointMetaPageData *old)
 {
 	int			freed = 0;
-	BlockNumber blk;
+	BlockNumber blk,
+				nblocks = 0;
 	uint32		i;
 
 	blk = old->image_start;
 	for (i = 0; i < old->nchunks && BlockNumberIsValid(blk); i++)
 	{
-		Buffer		buf = ReadBuffer(index, blk);
+		Buffer		buf = tp_read_linked(index, blk, &nblocks);
 		BlockNumber next;
 
 		LockBuffer(buf, BUFFER_LOCK_SHARE);
@@ -278,7 +279,7 @@ tp_free_generation_pages(Relation index, const TrigpointMetaPageData *old)
 	blk = old->log_first;
 	while (BlockNumberIsValid(blk))
 	{
-		Buffer		buf = ReadBuffer(index, blk);
+		Buffer		buf = tp_read_linked(index, blk, &nblocks);
 		BlockNumber next;
 
 		LockBuffer(buf, BUFFER_LOCK_SHARE);
@@ -297,12 +298,13 @@ static BlockNumber
 tp_chain_max_block(Relation index, BlockNumber start, uint32 limit)
 {
 	BlockNumber blk = start,
-				max = InvalidBlockNumber;
+				max = InvalidBlockNumber,
+				nblocks = 0;
 	uint32		i = 0;
 
 	while (BlockNumberIsValid(blk) && (limit == 0 || i < limit))
 	{
-		Buffer		buf = ReadBuffer(index, blk);
+		Buffer		buf = tp_read_linked(index, blk, &nblocks);
 		BlockNumber next;
 
 		LockBuffer(buf, BUFFER_LOCK_SHARE);
@@ -324,11 +326,12 @@ tp_chain_collect(Relation index, BlockNumber start, uint32 limit, uint32 *n_out)
 	uint32		cap = limit ? limit : 256,
 				n = 0;
 	BlockNumber *out = (BlockNumber *) palloc(sizeof(BlockNumber) * cap);
-	BlockNumber blk = start;
+	BlockNumber blk = start,
+				nblocks = 0;
 
 	while (BlockNumberIsValid(blk) && (limit == 0 || n < limit))
 	{
-		Buffer		buf = ReadBuffer(index, blk);
+		Buffer		buf = tp_read_linked(index, blk, &nblocks);
 
 		if (n == cap)
 		{
@@ -1050,7 +1053,8 @@ static int
 tp_carry_log(Relation index, TrigpointCached *c, TrigpointMetaPageData *newmeta, const TrigpointMetaPageData *cur,
 			 const int32 *newpos, int n_old)
 {
-	BlockNumber blk;
+	BlockNumber blk,
+				nblocks = 0;
 	OffsetNumber from;
 	List	   *recs = NIL;
 	ListCell   *lc;
@@ -1066,7 +1070,7 @@ tp_carry_log(Relation index, TrigpointCached *c, TrigpointMetaPageData *newmeta,
 	/* collect copies of the unconsumed records (page by page under share locks) */
 	for (;;)
 	{
-		Buffer		buf = ReadBuffer(index, blk);
+		Buffer		buf = tp_read_linked(index, blk, &nblocks);
 		Page		page;
 		OffsetNumber off,
 					max;

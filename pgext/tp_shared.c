@@ -364,7 +364,8 @@ tp_read_blob(Relation index, const TrigpointMetaPageData *meta)
 		ereport(ERROR, (errcode(ERRCODE_OUT_OF_MEMORY), errmsg("trigpoint: out of memory loading the index image")));
 	PG_TRY();
 	{
-		BlockNumber blk = meta->image_start;
+		BlockNumber blk = meta->image_start,
+					nblocks = 0;
 
 		/* the image is a chain of pages (special `next`); since E3 they need not be contiguous */
 		for (i = 0; i < meta->nchunks; i++)
@@ -376,14 +377,16 @@ tp_read_blob(Relation index, const TrigpointMetaPageData *meta)
 
 			if (!BlockNumberIsValid(blk))
 				ereport(ERROR, (errcode(ERRCODE_INDEX_CORRUPTED), errmsg("trigpoint: image chain of generation %u ends after %u of %u pages", meta->generation, i, meta->nchunks), errhint("Run trigpoint_check(<index>, true); REINDEX rebuilds the index.")));
-			buf = ReadBuffer(index, blk);
+			buf = tp_read_linked(index, blk, &nblocks);
 			LockBuffer(buf, BUFFER_LOCK_SHARE);
 			page = BufferGetPage(buf);
-			if (TrigpointPageGetOpaque(page)->kind != TP_PAGE_IMAGE || TrigpointPageGetOpaque(page)->generation != meta->generation ||
-				PageGetMaxOffsetNumber(page) < FirstOffsetNumber)
+			if (!tp_page_header_ok(page) || TrigpointPageGetOpaque(page)->kind != TP_PAGE_IMAGE ||
+				TrigpointPageGetOpaque(page)->generation != meta->generation || PageGetMaxOffsetNumber(page) < FirstOffsetNumber)
 				ereport(ERROR, (errcode(ERRCODE_INDEX_CORRUPTED), errmsg("trigpoint: block %u is not an image page of generation %u", blk, meta->generation), errhint("Run trigpoint_check(<index>, true); REINDEX rebuilds the index.")));
 			iid = PageGetItemId(page, FirstOffsetNumber);
 			sz = ItemIdGetLength(iid);
+			if (!tp_item_fits(page, iid) || sz > TP_CHUNK_BYTES)
+				ereport(ERROR, (errcode(ERRCODE_INDEX_CORRUPTED), errmsg("trigpoint: image page %u holds no whole chunk", blk), errhint("Run trigpoint_check(<index>, true); REINDEX rebuilds the index.")));
 			if (off + sz > meta->blob_bytes)
 				ereport(ERROR, (errcode(ERRCODE_INDEX_CORRUPTED), errmsg("trigpoint: index image larger than its meta page says"), errhint("Run trigpoint_check(<index>, true); REINDEX rebuilds the index.")));
 			memcpy(blob + off, PageGetItem(page, iid), sz);

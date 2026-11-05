@@ -266,9 +266,9 @@ tp_log_record_problem(Page page, OffsetNumber off, BlockNumber blk, int L, const
 	int			i;
 
 	*why = NULL;
-	if (!ItemIdIsNormal(iid) || len < offsetof(TrigpointLogRecord, codes))
+	if (!tp_item_fits(page, iid) || len < offsetof(TrigpointLogRecord, codes))
 	{
-		*why = psprintf("log record at block %u offset %u is too short (%zu bytes)", blk, off, len);
+		*why = psprintf("log record at block %u offset %u is not a whole item of its page or too short (%zu bytes)", blk, off, len);
 		return NULL;
 	}
 	rec = (TrigpointLogRecord *) PageGetItem(page, iid);
@@ -377,14 +377,14 @@ apply_log_page(TrigpointCached *c, Page page, BlockNumber blk, OffsetNumber from
 
 /* read and check one log page of this generation; returns the pinned, share-locked buffer */
 static Buffer
-read_log_page(Relation index, BlockNumber blk, uint32 generation)
+read_log_page(Relation index, BlockNumber blk, uint32 generation, BlockNumber *nblocks)
 {
-	Buffer		buf = ReadBuffer(index, blk);
+	Buffer		buf = tp_read_linked(index, blk, nblocks);
 	TrigpointPageOpaque op;
 
 	LockBuffer(buf, BUFFER_LOCK_SHARE);
-	op = TrigpointPageGetOpaque(BufferGetPage(buf));
-	if (op->kind != TP_PAGE_LOG || op->generation != generation)
+	op = tp_page_header_ok(BufferGetPage(buf)) ? TrigpointPageGetOpaque(BufferGetPage(buf)) : NULL;
+	if (op == NULL || op->kind != TP_PAGE_LOG || op->generation != generation)
 	{
 		UnlockReleaseBuffer(buf);
 		ereport(ERROR, (errcode(ERRCODE_INDEX_CORRUPTED), errmsg("trigpoint: block %u is not a log page of generation %u", blk, generation), errhint("Run trigpoint_check(<index>, true); REINDEX rebuilds the index.")));
@@ -406,12 +406,13 @@ prescan_log(Relation index, TrigpointCached *c, const TrigpointMetaPageData *met
 				cap = 0,
 				i;
 	int32	   *dead_ids = NULL;
+	BlockNumber nblocks = 0;
 
 	*ninserts = 0;
 	*dead = NULL;
 	for (;;)
 	{
-		Buffer		buf = read_log_page(index, blk, meta->generation);
+		Buffer		buf = read_log_page(index, blk, meta->generation, &nblocks);
 		Page		page = BufferGetPage(buf);
 		OffsetNumber max = PageGetMaxOffsetNumber(page),
 					off;
@@ -468,6 +469,7 @@ apply_log_from(Relation index, TrigpointCached *c, const TrigpointMetaPageData *
 	BlockNumber blk;
 	uint8	   *dead = NULL;
 	int			ninserts = 0;
+	BlockNumber nblocks = 0;
 
 	if (!BlockNumberIsValid(meta->log_first))
 		return;
@@ -481,7 +483,7 @@ apply_log_from(Relation index, TrigpointCached *c, const TrigpointMetaPageData *
 	{
 		for (;;)
 		{
-			Buffer		buf = read_log_page(index, blk, meta->generation);
+			Buffer		buf = read_log_page(index, blk, meta->generation, &nblocks);
 			BlockNumber next = TrigpointPageGetOpaque(BufferGetPage(buf))->next;
 
 			c->log_off = apply_log_page(c, BufferGetPage(buf), blk, blk == c->log_blk ? c->log_off : InvalidOffsetNumber);

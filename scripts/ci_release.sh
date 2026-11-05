@@ -20,7 +20,8 @@ run_suites() {  # $1 = image, $2 = label
     docker rm -f $name >/dev/null 2>&1 || true
     docker run -d --rm --name $name -p $PORT:5432 --shm-size 2g -e POSTGRES_USER=vsroute -e POSTGRES_PASSWORD=vsroute -e POSTGRES_DB=vsroute \
         "$1" postgres -c shared_buffers=512MB -c maintenance_work_mem=512MB -c max_parallel_workers_per_gather=0 -c max_worker_processes=16 >/dev/null
-    for i in $(seq 1 60); do docker exec $name pg_isready -U vsroute -q 2>/dev/null && break; sleep 1; done
+    # pg_isready also answers for the image's temporary init server (socket only); wait for the real one over TCP
+    for i in $(seq 1 60); do docker exec -e PGPASSWORD=vsroute $name psql -h 127.0.0.1 -U vsroute -d vsroute -tAc 'SELECT 1' >/dev/null 2>&1 && break; sleep 1; done
     docker exec $name psql -U vsroute -tAc "CREATE EXTENSION vector; CREATE EXTENSION trigpoint; SELECT version(); SELECT trigpoint_version();"
     PGHOST=localhost PGPORT=$PORT PGUSER=vsroute PGPASSWORD=vsroute PGDATABASE=vsroute $PY -m pytest $SUITES -q -p no:cacheprovider 2>&1 | tee /tmp/trigpoint_ci_$2.log | tail -3
     [ -f docs/operator-guide.md ] && sh scripts/doc_test.sh $name

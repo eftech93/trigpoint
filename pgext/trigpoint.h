@@ -10,6 +10,7 @@
 #include "access/relscan.h"
 #include "nodes/execnodes.h"
 #include "nodes/pathnodes.h"
+#include "storage/bufmgr.h"
 #include "storage/bufpage.h"
 #include "storage/itemptr.h"
 #include "utils/rel.h"
@@ -133,6 +134,48 @@ tp_normalize(float *x, int D)
 		for (i = 0; i < D; i++)
 			x[i] *= inv;
 	}
+}
+
+/*
+ * Read a block reached through a pointer stored in the index (a chain's `next`). A pointer at or past the end of the
+ * relation is index corruption (XX002), not the storage manager's could-not-open-file: *nblocks caches the relation's
+ * length (0 = not read yet) and is re-read once before giving up, since appenders extend the log meanwhile.
+ */
+static inline Buffer
+tp_read_linked(Relation index, BlockNumber blk, BlockNumber *nblocks)
+{
+	if (blk >= *nblocks)
+	{
+		*nblocks = RelationGetNumberOfBlocks(index);
+		if (blk >= *nblocks)
+			ereport(ERROR, (errcode(ERRCODE_INDEX_CORRUPTED),
+							errmsg("trigpoint: index \"%s\" points at block %u, past its %u blocks", RelationGetRelationName(index), blk, *nblocks),
+							errhint("Run trigpoint_check(<index>, true); REINDEX rebuilds the index.")));
+	}
+	return ReadBuffer(index, blk);
+}
+
+/*
+ * A page's header is ours and sane before anything reads through it: the special space is our size and where it
+ * should be, and pd_lower <= pd_upper <= pd_special (PageGetMaxOffsetNumber and PageGetSpecialPointer read past the
+ * page otherwise). Then an item fits when it is a normal item inside [pd_upper, pd_special).
+ */
+static inline bool
+tp_page_header_ok(Page page)
+{
+	PageHeader	ph = (PageHeader) page;
+
+	return !PageIsNew(page) && ph->pd_special == BLCKSZ - MAXALIGN(sizeof(TrigpointPageOpaqueData)) &&
+		ph->pd_lower >= SizeOfPageHeaderData && ph->pd_lower <= ph->pd_upper && ph->pd_upper <= ph->pd_special;
+}
+
+static inline bool
+tp_item_fits(Page page, ItemId iid)
+{
+	PageHeader	ph = (PageHeader) page;
+
+	return ItemIdIsNormal(iid) && ItemIdGetOffset(iid) >= ph->pd_upper &&
+		ItemIdGetOffset(iid) + ItemIdGetLength(iid) <= ph->pd_special;
 }
 
 /* tp_scan.c: the checked log record at (page, off) — ERROR (index corrupted) when it is not one (H3) */

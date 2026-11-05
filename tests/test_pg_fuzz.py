@@ -166,6 +166,24 @@ def test_random_byte_mutations_error_cleanly_or_answer(conn, table):
     pg.close()
 
 
+def test_a_chain_pointer_past_the_end_is_index_corruption(conn, table):
+    """The fuzz case of 2026-11-05 (iteration 1352 at seed 5, 20,000 iterations): a byte of a page's `next` pointer
+    (special space, bytes 8184-8187) sends the chain past the relation's end. The reader must say XX002, not the
+    storage manager's 58P01 (could not open file)."""
+    q, gt = table["q"], table["gt"]
+    pg = Pager()
+    nblocks = pg.nblocks()
+    for blk in sorted({1, nblocks // 2, nblocks - 2, nblocks - 1}):   # image pages and the log's tail
+        orig = pg.peek(blk, BLCKSZ - 6)
+        pg.poke(blk, BLCKSZ - 6, orig ^ 0x35)
+        try:
+            verdict = fresh_query(q, gt)
+            assert verdict[0] == "ok" or verdict[1] == "XX002", (blk, verdict)
+        finally:
+            pg.poke(blk, BLCKSZ - 6, orig)
+    pg.close()
+
+
 def test_reindex_repairs_a_corrupted_index(conn, table):
     cur, q, gt = table["cur"], table["q"], table["gt"]
     pg = Pager()
