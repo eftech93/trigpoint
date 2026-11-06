@@ -317,6 +317,7 @@ typedef struct TrigpointSegHeader
 extern TrigpointSegHeader *tp_shared_acquire(Relation index, const TrigpointMetaPageData *meta, TrigpointCached *c);
 extern void tp_shared_release(TrigpointCached *c);
 extern void tp_shared_retire(Relation index, uint32 generation);
+extern void tp_shared_collect(void);	/* unpin the images of this database's dropped indexes */
 extern char *tp_read_blob(Relation index, const TrigpointMetaPageData *meta);
 extern void tp_delta_graph_free(TrigpointCached *c);
 extern void tp_delta_graph_add(TrigpointCached *c, int k, const int8 *codes);

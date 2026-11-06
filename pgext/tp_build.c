@@ -675,6 +675,7 @@ tp_build(Relation heap, Relation index, IndexInfo *indexInfo)
 						errmsg("trigpoint: the indexed column must have fixed dimensions, e.g. vector(1536)")));
 	if (indexInfo->ii_NumIndexAttrs != 1)
 		ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED), errmsg("trigpoint: one indexed column only")));
+	tp_shared_collect();		/* the images of dropped indexes leave shared memory before the build takes its area */
 
 	memset(&meta, 0, sizeof(meta));
 	meta.magic = TP_MAGIC;

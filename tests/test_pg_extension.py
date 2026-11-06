@@ -241,6 +241,25 @@ def test_scan_in_flight_keeps_its_segment_across_a_compaction(conn, table):
     table["x"], table["ids"] = x[alive], ids[alive]
 
 
+@pytest.mark.shared_images
+def test_a_build_releases_the_images_of_dropped_indexes(conn, table):
+    """W a2: a dropped index's shared image stayed pinned until a later load in its database collected it, so the
+    next CREATE INDEX took its build area next to it (/dev/shm 32,750 of 32,768 MiB at 5M x 1024). The build now
+    collects first: the dropped index's entry leaves trigpoint_shared() before anything is loaded."""
+    cur, x, q = _own_table(conn, "tp_dropimg")
+    cur.execute("SET trigpoint.shared_image = on"); cur.execute("SET enable_seqscan = off")
+    cur.execute("SELECT id FROM tp_dropimg ORDER BY v <-> %s::vector LIMIT 10", (_lit(q[0]),), prepare=False); cur.fetchall()
+    cur.execute("SELECT pg_relation_filenode('tp_dropimg_ix')"); fn = cur.fetchone()[0]
+    listed = "SELECT count(*) FROM trigpoint_shared() WHERE dbid = (SELECT oid FROM pg_database WHERE datname = current_database()) AND relfilenode = %s"
+    cur.execute(listed, (fn,)); assert cur.fetchone()[0] == 1
+    cur.execute("DROP INDEX tp_dropimg_ix")
+    cur.execute(listed, (fn,)); assert cur.fetchone()[0] == 1  # nothing collects at the drop itself
+    cur.execute("CREATE INDEX tp_dropimg_ix2 ON tp_dropimg USING trigpoint (v vector_l2_ops) WITH (cells = 64, calibration_queries = 500)")
+    cur.execute(listed, (fn,)); assert cur.fetchone()[0] == 0  # collected by the build
+    cur.execute("SELECT count(*) FROM trigpoint_shared() WHERE indexrelid = 'tp_dropimg_ix2'::regclass"); assert cur.fetchone()[0] == 0  # the build loads nothing
+    cur.execute("DROP TABLE tp_dropimg"); cur.execute("RESET enable_seqscan"); cur.execute("RESET trigpoint.shared_image")
+
+
 def test_inserts_concurrent_with_a_compaction_are_not_lost(conn, table):
     """Lost-write regression (found in E1, fixed after): rows inserted by another backend while a
     compaction runs — between its log sync and its meta flip — must be in the index afterwards. A thread

@@ -101,6 +101,9 @@ heap fetches and the time split (core, route, heap).
   backend, a LOG line each time). `trigpoint.shared_image = off` makes every backend read a private copy always.
 - `trigpoint_backend_memory()` is this backend's resident size; a private copy shows up there.
 - The container's `/dev/shm` (compose `shm_size`) must hold every shared image plus, during a build, the build's vector area.
+  A dropped index's image is released by the next build or image load in its database, so a drop followed by a rebuild
+  needs room for the build's area, not the old image too, unless a session that used the old index has not run a
+  statement since the drop (it still maps the image until it does).
 
 ## 5. Maintenance
 

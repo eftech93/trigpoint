@@ -17,7 +17,8 @@
  * backend retires the old generation (tp_shared_retire): the entry is removed and the segment
  * unpinned, so the DSM control's reference count destroys it when the last mapped backend detaches
  * (its next sync sees the new generation). Entries whose relfilenumber no longer exists (DROP INDEX,
- * REINDEX) are collected the next time a backend loads an image in that database.
+ * REINDEX) are collected the next time a backend loads an image or builds an index in that database
+ * (tp_shared_collect); a backend that still maps such a segment keeps it until its next invalidation.
  *
  * Boundary rules unchanged: every PostgreSQL call here is in C; the core writes into the segment
  * through tp_index_flatten, which cannot longjmp.
@@ -280,6 +281,18 @@ tp_shared_gc(TrigpointSharedState *st)
 		}
 		LWLockRelease(&st->lock);
 	}
+}
+
+/* the build's sweep (W a2): a dropped index's image stays pinned until a load in its database collects it, and a
+ * build allocates its own area before anything is loaded, so a dropped 5M x 1024 index's 4 GB image still held
+ * /dev/shm while its replacement's build needed 30 GB of it. CREATE INDEX and REINDEX collect first. */
+void
+tp_shared_collect(void)
+{
+	TrigpointSharedState *st = tp_shared_state();
+
+	if (st != NULL)				/* 16 without the preload: no registry, nothing pinned */
+		tp_shared_gc(st);
 }
 
 /* P5e: one mapping per segment per backend. Two cache entries can refer to the same segment (REINDEX CONCURRENTLY

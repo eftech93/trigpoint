@@ -26,7 +26,11 @@ PostgreSQL major.
 - Robustness: a scan refuses an image value a page corruption put out of range (cell, position, graph link) instead of
   indexing with it; a compaction runs the deep checker before it reads the image; the deep checker validates the model's
   floats; `statement_timeout` and cancel stop builds, scans, compactions and checks; `trigpoint.on_shared_cap = private`
-  reads a private copy at the shared-memory cap; a loader that dies leaves no half-published entry.
+  reads a private copy at the shared-memory cap; a loader that dies leaves no half-published entry; a page-chain pointer
+  past the relation's end, a broken page header or an item outside its page is `XX002`, never an I/O error or a stray
+  read.
+- A dropped index's shared image no longer waits for the next image load in its database: `CREATE INDEX` and `REINDEX`
+  unpin the images of dropped indexes before the build takes its own shared-memory area.
 - Upgrade paths tested: `ALTER EXTENSION UPDATE` from 0.2 step by step, `pg_dump` round trip, `pg_upgrade` 17 -> 18,
   `CREATE INDEX` / `REINDEX INDEX CONCURRENTLY` under writers.
 - `trigpoint.compact_frac` is clamped to 0.0001–100.
