@@ -1,20 +1,32 @@
-# Trigpoint CI.
-# On push and pull request: the test image on PostgreSQL 16, 17 and 18 and the release image on 17, each running the
-# quick suites against a throwaway server (scripts/ci_release.sh). Nightly: the same plus the short soak, crash and
-# standby runs of the full loop.
+# Trigpoint CI, on the project's self-hosted runners (labels: self-hosted, Linux, X64, local; they need Docker and
+# Python 3). On push and pull request: the test image on PostgreSQL 16, 17 and 18 and the release image on 17, each
+# running the quick suites against a throwaway server (scripts/ci_release.sh). Nightly: the same plus the soak, crash
+# and standby runs. Each job uses its own container name, port and image tags, and removes them when it ends.
+#
+# Pull requests from forks never run here: a self-hosted runner would execute their code on our machines. Keep
+# "Require approval for all external contributors" on as well (Settings > Actions > General).
 name: ci
 on:
   push:
     branches: ["**"]
+    tags-ignore: ["**"]
   pull_request:
   schedule:
     - cron: "17 3 * * *"
   workflow_dispatch:
 
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   quick:
     name: quick suites (PG ${{ matrix.pg }}, ${{ matrix.which }})
-    runs-on: ubuntu-latest
+    if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: [self-hosted, Linux, X64, local]
     timeout-minutes: 60
     strategy:
       fail-fast: false
@@ -22,12 +34,16 @@ jobs:
         include:
           - pg: 16
             which: test
+            port: 5461
           - pg: 17
             which: test
+            port: 5471
           - pg: 18
             which: test
+            port: 5481
           - pg: 17
             which: release
+            port: 5472
     steps:
       - uses: actions/checkout@v5
       - uses: actions/setup-python@v6
@@ -41,12 +57,17 @@ jobs:
         env:
           PG_MAJOR: ${{ matrix.pg }}
           WHICH: ${{ matrix.which }}
+          PORT: ${{ matrix.port }}
+          CI_NAME: tp-ci-${{ github.run_id }}-${{ matrix.pg }}-${{ matrix.which }}
+          TAG_SUFFIX: -ci${{ github.run_id }}
+          CI_CLEAN: "1"
+          ARCHFLAGS: ${{ matrix.which == 'release' && '-march=x86-64-v3' || '' }}
         run: sh scripts/ci_release.sh
 
   nightly:
     name: nightly full loop
     if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
-    runs-on: ubuntu-latest
+    runs-on: [self-hosted, Linux, X64, local]
     timeout-minutes: 180
     steps:
       - uses: actions/checkout@v5
@@ -60,6 +81,10 @@ jobs:
       - name: test image, PG 17, every suite plus the soak, crash and standby scripts
         env:
           TP_FUZZ_ITER: "20000"
+          PORT: "5490"
+          CI_NAME: tp-nightly-${{ github.run_id }}
+          TAG_SUFFIX: -nightly${{ github.run_id }}
+          CI_CLEAN: "1"
         run: |
           export WHICH=test
           if [ -f scripts/ci.sh ]; then sh scripts/ci.sh; else sh scripts/ci_release.sh; fi
