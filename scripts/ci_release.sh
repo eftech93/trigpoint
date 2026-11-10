@@ -52,7 +52,11 @@ run_suites() {  # $1 = image, $2 = label
     PGHOST=$DBHOST PGPORT=$DBPORT PGUSER=vsroute PGPASSWORD=vsroute PGDATABASE=vsroute $PY -m pytest $SUITES -q -p no:cacheprovider 2>&1 | tee $LOGDIR/trigpoint_ci_${CI_NAME}_$2.log | tail -3
     [ -f docs/operator-guide.md ] && sh scripts/doc_test.sh $name
     docker stop $name >/dev/null
-    tail -1 $LOGDIR/trigpoint_ci_${CI_NAME}_$2.log | grep -q " passed" && ! tail -1 $LOGDIR/trigpoint_ci_${CI_NAME}_$2.log | grep -q "failed\|error" || { echo "$2 ($1): suites failed"; exit 1; }
+    LOG=$LOGDIR/trigpoint_ci_${CI_NAME}_$2.log
+    tail -1 $LOG | grep -q " passed" && ! tail -1 $LOG | grep -q "failed\|error" || {
+        # the failures with their tracebacks (pytest -q prints them before the summary), last 150 lines
+        sed -n '/= FAILURES =\|= ERRORS =/,$p' $LOG | tail -150
+        echo "$2 ($1): suites failed"; exit 1; }
 }
 
 if [ "$WHICH" = "test" ] || [ "$WHICH" = "both" ]; then
