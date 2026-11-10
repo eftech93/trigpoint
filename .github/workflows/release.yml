@@ -66,6 +66,7 @@ jobs:
           CI_NAME: tp-rel-${{ github.run_id }}-${{ matrix.pg }}
           TAG_SUFFIX: -rel${{ github.run_id }}
           CI_CLEAN: "1"
+          TP_TEST_SLOW: "2"   # both runners share one machine: the time bounds of the tests x2
           ARCHFLAGS: -march=x86-64-v3
         run: |
           rm -rf dist

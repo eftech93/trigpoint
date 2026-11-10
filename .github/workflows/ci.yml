@@ -60,6 +60,7 @@ jobs:
           CI_NAME: tp-ci-${{ github.run_id }}-${{ matrix.pg }}-${{ matrix.which }}
           TAG_SUFFIX: -ci${{ github.run_id }}
           CI_CLEAN: "1"
+          TP_TEST_SLOW: "2"   # both runners share one machine: the time bounds of the tests x2
           ARCHFLAGS: ${{ matrix.which == 'release' && '-march=x86-64-v3' || '' }}
         run: sh scripts/ci_release.sh
 
@@ -84,6 +85,7 @@ jobs:
           CI_NAME: tp-nightly-${{ github.run_id }}
           TAG_SUFFIX: -nightly${{ github.run_id }}
           CI_CLEAN: "1"
+          TP_TEST_SLOW: "2"   # both runners share one machine: the time bounds of the tests x2
         run: |
           export WHICH=test
           if [ -f scripts/ci.sh ]; then sh scripts/ci.sh; else sh scripts/ci_release.sh; fi

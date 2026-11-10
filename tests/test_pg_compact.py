@@ -4,6 +4,7 @@ consistent (every live row found at exact = on, deleted rows never returned, tri
 records appended during the compaction carried with their new ids).
 """
 
+import os
 import struct
 
 import numpy as np
@@ -19,7 +20,7 @@ D = 32
 def _connect():
     try:
         c = psycopg.connect(autocommit=True, connect_timeout=3)
-        c.execute("SET statement_timeout = '%ds'" % (300 * (5 if 'sanitizer build' in c.execute('SELECT version()').fetchone()[0] else 1)))
+        c.execute("SET statement_timeout = '%ds'" % int(300 * (5 if 'sanitizer build' in c.execute('SELECT version()').fetchone()[0] else 1) * float(os.environ.get('TP_TEST_SLOW', '1'))))
         c.execute("SET client_min_messages = warning")
         return c
     except Exception as e:  # noqa: BLE001
