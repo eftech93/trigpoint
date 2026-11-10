@@ -13,6 +13,9 @@ PostgreSQL major.
   `trigpoint.max_scan_tuples` (20,000), `trigpoint.max_probes` (0). A scan goes on in batches when the executor asks for
   more than its first k rows (a `WHERE` above the index, a `LIMIT` above `trigpoint.k`): k and the cells opened double,
   the routed order is kept, no heap row is fetched twice.
+- Test builds only (`TEST_HOOKS=1`), for ablation studies: `trigpoint.debug_centroid_router` (rank cells by
+  centroid distance alone, no router graph) and `trigpoint.debug_ch` (0 = calibrated; a value in (0, 1] replaces the
+  tail cosines at every level, 1 = the exact bound over the probed cells). Release builds do not have them.
 - Compaction returns its space: after the flip the new image is moved into the pages the retired generation freed and
   the relation is truncated after its last live page (`trigpoint.compact_reclaim`, on).
 - Security: every SQL helper that takes a `regclass` requires `SELECT` on the indexed table (`trigpoint_check(…, true)`
@@ -26,7 +29,11 @@ PostgreSQL major.
 - Robustness: a scan refuses an image value a page corruption put out of range (cell, position, graph link) instead of
   indexing with it; a compaction runs the deep checker before it reads the image; the deep checker validates the model's
   floats; `statement_timeout` and cancel stop builds, scans, compactions and checks; `trigpoint.on_shared_cap = private`
-  reads a private copy at the shared-memory cap; a loader that dies leaves no half-published entry.
+  reads a private copy at the shared-memory cap; a loader that dies leaves no half-published entry; a page-chain pointer
+  past the relation's end, a broken page header or an item outside its page is `XX002`, never an I/O error or a stray
+  read.
+- A dropped index's shared image no longer waits for the next image load in its database: `CREATE INDEX` and `REINDEX`
+  unpin the images of dropped indexes before the build takes its own shared-memory area.
 - Upgrade paths tested: `ALTER EXTENSION UPDATE` from 0.2 step by step, `pg_dump` round trip, `pg_upgrade` 17 -> 18,
   `CREATE INDEX` / `REINDEX INDEX CONCURRENTLY` under writers.
 - `trigpoint.compact_frac` is clamped to 0.0001–100.

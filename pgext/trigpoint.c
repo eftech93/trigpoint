@@ -69,6 +69,8 @@ bool		tp_debug_load_fatal = false;	/* test hook: raise FATAL inside a shared-ima
 #ifdef TRIGPOINT_TEST_HOOKS
 bool		tp_debug_skip_heap = false;	/* diagnostic: no heap fetches, results ranked by lower bound */
 bool		tp_debug_no_delta_graph = false;	/* diagnostic: route without the delta graph */
+bool		tp_debug_centroid_router = false;	/* ablation: rank cells by centroid distance alone, no router graph */
+double		tp_debug_ch = 0;	/* ablation: >0 replaces the calibrated tail cosines by this value at every level */
 #endif
 bool		tp_shared = true;	/* E1: read the generation's image from one DSM segment shared by every backend */
 #ifdef TRIGPOINT_TEST_HOOKS
@@ -154,6 +156,10 @@ _PG_init(void)
 							 NULL, &tp_debug_skip_heap, false, PGC_USERSET, 0, NULL, NULL, NULL);
 	DefineCustomBoolVariable("trigpoint.debug_no_delta_graph", "Diagnostic only: route each scan with the image's router alone, the delta graph over the appended positions detached for the scan (their cells are still scanned when ranked). Off: today's behaviour.",
 							 NULL, &tp_debug_no_delta_graph, false, PGC_USERSET, 0, NULL, NULL, NULL);
+	DefineCustomBoolVariable("trigpoint.debug_centroid_router", "Ablation only: route each scan by centroid distance in the head space alone (no router graph, trigpoint.hits ignored); the first trigpoint.probes cells by centroid are scanned.",
+							 NULL, &tp_debug_centroid_router, false, PGC_USERSET, 0, NULL, NULL, NULL);
+	DefineCustomRealVariable("trigpoint.debug_ch", "Ablation only: 0 = the calibrated tail cosines (trigpoint.delta); a value in (0, 1] is used at every level instead (1 = the exact bound over the probed cells).",
+							 NULL, &tp_debug_ch, 0.0, 0.0, 1.0, PGC_USERSET, 0, NULL, NULL, NULL);
 	DefineCustomBoolVariable("trigpoint.allow_build_threads", "Honour the `threads` build option (the core's thread shortcut, measurement only); off: CREATE INDEX uses maintenance workers.",
 							 NULL, &tp_allow_build_threads, false, PGC_USERSET, 0, NULL, NULL, NULL);
 #endif
