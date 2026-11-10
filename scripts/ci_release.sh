@@ -31,12 +31,25 @@ SUITES="tests/test_pg_extension.py tests/test_pg_check.py tests/test_pg_edge.py 
 run_suites() {  # $1 = image, $2 = label
     name=$CI_NAME-$2
     docker rm -f $name >/dev/null 2>&1 || true
-    docker run -d --rm --name $name -p $PORT:5432 --shm-size 2g -e POSTGRES_USER=vsroute -e POSTGRES_PASSWORD=vsroute -e POSTGRES_DB=vsroute \
+    # A runner inside a container (Docker socket of the host) cannot reach a published port on its own localhost:
+    # the server then joins the runner's network and is reached by its address. Otherwise it is published on
+    # 127.0.0.1 at $PORT, or at a free port Docker picks (PORT=0), so parallel jobs never collide.
+    SELF_NET=
+    [ -f /.dockerenv ] && SELF_NET=$(docker inspect -f '{{range $k, $v := .NetworkSettings.Networks}}{{$k}} {{end}}' "$(hostname)" 2>/dev/null | awk '{print $1}')
+    [ -f /.dockerenv ] && [ -z "$SELF_NET" ] && echo "warning: inside a container but $(hostname) is not a container on this Docker host; publishing a port instead"
+    if [ -n "$SELF_NET" ]; then NETARGS="--network $SELF_NET"; elif [ "$PORT" = 0 ]; then NETARGS="-p 127.0.0.1::5432"; else NETARGS="-p 127.0.0.1:$PORT:5432"; fi
+    docker run -d --rm --name $name $NETARGS --shm-size 2g -e POSTGRES_USER=vsroute -e POSTGRES_PASSWORD=vsroute -e POSTGRES_DB=vsroute \
         "$1" postgres -c shared_buffers=512MB -c maintenance_work_mem=512MB -c max_parallel_workers_per_gather=0 -c max_worker_processes=16 >/dev/null
     # pg_isready also answers for the image's temporary init server (socket only); wait for the real one over TCP
     for i in $(seq 1 60); do docker exec -e PGPASSWORD=vsroute $name psql -h 127.0.0.1 -U vsroute -d vsroute -tAc 'SELECT 1' >/dev/null 2>&1 && break; sleep 1; done
+    if [ -n "$SELF_NET" ]; then
+        DBHOST=$(docker inspect -f "{{(index .NetworkSettings.Networks \"$SELF_NET\").IPAddress}}" $name); DBPORT=5432
+    else
+        DBHOST=127.0.0.1; DBPORT=$(docker port $name 5432/tcp | head -1 | sed 's/.*://')
+    fi
+    echo "server $name at $DBHOST:$DBPORT${SELF_NET:+ (network $SELF_NET)}"
     docker exec $name psql -U vsroute -tAc "CREATE EXTENSION vector; CREATE EXTENSION trigpoint; SELECT version(); SELECT trigpoint_version();"
-    PGHOST=localhost PGPORT=$PORT PGUSER=vsroute PGPASSWORD=vsroute PGDATABASE=vsroute $PY -m pytest $SUITES -q -p no:cacheprovider 2>&1 | tee $LOGDIR/trigpoint_ci_${CI_NAME}_$2.log | tail -3
+    PGHOST=$DBHOST PGPORT=$DBPORT PGUSER=vsroute PGPASSWORD=vsroute PGDATABASE=vsroute $PY -m pytest $SUITES -q -p no:cacheprovider 2>&1 | tee $LOGDIR/trigpoint_ci_${CI_NAME}_$2.log | tail -3
     [ -f docs/operator-guide.md ] && sh scripts/doc_test.sh $name
     docker stop $name >/dev/null
     tail -1 $LOGDIR/trigpoint_ci_${CI_NAME}_$2.log | grep -q " passed" && ! tail -1 $LOGDIR/trigpoint_ci_${CI_NAME}_$2.log | grep -q "failed\|error" || { echo "$2 ($1): suites failed"; exit 1; }

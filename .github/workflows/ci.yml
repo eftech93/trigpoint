@@ -8,8 +8,7 @@
 name: ci
 on:
   push:
-    branches: ["**"]
-    tags-ignore: ["**"]
+    branches: [main]
   pull_request:
   schedule:
     - cron: "17 3 * * *"
@@ -34,16 +33,12 @@ jobs:
         include:
           - pg: 16
             which: test
-            port: 5461
           - pg: 17
             which: test
-            port: 5471
           - pg: 18
             which: test
-            port: 5481
           - pg: 17
             which: release
-            port: 5472
     steps:
       - uses: actions/checkout@v5
       - uses: actions/setup-python@v6
@@ -57,7 +52,7 @@ jobs:
         env:
           PG_MAJOR: ${{ matrix.pg }}
           WHICH: ${{ matrix.which }}
-          PORT: ${{ matrix.port }}
+          PORT: "0"
           CI_NAME: tp-ci-${{ github.run_id }}-${{ matrix.pg }}-${{ matrix.which }}
           TAG_SUFFIX: -ci${{ github.run_id }}
           CI_CLEAN: "1"
@@ -81,7 +76,7 @@ jobs:
       - name: test image, PG 17, every suite plus the soak, crash and standby scripts
         env:
           TP_FUZZ_ITER: "20000"
-          PORT: "5490"
+          PORT: "0"
           CI_NAME: tp-nightly-${{ github.run_id }}
           TAG_SUFFIX: -nightly${{ github.run_id }}
           CI_CLEAN: "1"
