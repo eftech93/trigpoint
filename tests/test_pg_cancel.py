@@ -4,6 +4,7 @@ A 200k-row build, an exact scan, a compaction VACUUM and trigpoint_check(deep) e
 statement_timeout with sqlstate 57014 (query_canceled), the backend stays usable, the index is consistent afterwards
 (checker ok, no segment left loading) and the same statement completes without the timeout.
 """
+import os
 import struct
 import time
 
@@ -53,7 +54,8 @@ def table(conn):
     rec["ncols"] = 2; rec["l1"] = 4; rec["id"] = np.arange(N); rec["l2"] = 4 + 4 * D; rec["dim"] = D; rec["unused"] = 0; rec["v"] = x
     with cur.copy("COPY tp_cancel (id, v) FROM STDIN (FORMAT BINARY)") as cp:
         cp.write(b"PGCOPY\n\xff\r\n\0" + struct.pack(">ii", 0, 0)); cp.write(rec.tobytes()); cp.write(struct.pack(">h", -1))
-    yield {"q": q, "cur": cur, "slow": 5 if conn.sanitized else 1}
+    # TP_TEST_SLOW: a factor for a shared or loaded host (CI runners share one machine)
+    yield {"q": q, "cur": cur, "slow": (5 if conn.sanitized else 1) * float(os.environ.get("TP_TEST_SLOW", "1"))}
     cur.execute("RESET statement_timeout")
     cur.execute("DROP TABLE IF EXISTS tp_cancel")
 

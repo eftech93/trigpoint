@@ -15,7 +15,12 @@ CORE_DIR    = ../csrc
 CORE_LIB    = libtrigpoint_core.a
 CORE_OBJS   = core_cascade.o core_shim.o
 CORE_REV   := $(shell sha256sum $(CORE_DIR)/cascade.cpp | cut -c1-12)
-ARCHFLAGS  := $(shell sh $(CORE_DIR)/archflags.sh)
+# ARCHFLAGS: -march=native by default (csrc/archflags.sh). A package built for other machines sets a portable target,
+# e.g. make ARCHFLAGS=-march=x86-64-v3 (AVX2 + FMA, Haswell or later), as the release workflow does.
+# (empty counts as unset: Docker exposes an empty build-arg ARCHFLAGS to make as an empty environment variable)
+ifeq ($(strip $(ARCHFLAGS)),)
+override ARCHFLAGS := $(shell sh $(CORE_DIR)/archflags.sh)
+endif
 CXX        ?= g++
 # SANITIZE=1: -O1 -g with AddressSanitizer + UBSan on the core and the C module, linked into
 # trigpoint.so, built against the sanitized server of docker/Dockerfile.pg (PG_CONFIG points at it). Use gcc/g++.

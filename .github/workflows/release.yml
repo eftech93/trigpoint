@@ -1,0 +1,136 @@
+# Trigpoint release, on the self-hosted runners.
+#
+# Push a tag vX.Y.Z (e.g. git tag -a v0.5.0 -m "Trigpoint 0.5.0" && git push origin v0.5.0):
+#   1. check    - the tag's version is the one in META.json, trigpoint.control, pgext/Makefile, the Dockerfile and
+#                 CHANGELOG.md (scripts/check_version.sh)
+#   2. packages - for PostgreSQL 16, 17 and 18: the release image and its .deb, built for any x86-64-v3 machine
+#                 (AVX2 + FMA, Haswell or later; not -march=native), and the quick suites run against that image
+#   3. pgxn     - the PGXN source zip (scripts/pgxn_dist.sh), with hnswlib's headers bundled
+#   4. release  - a DRAFT GitHub release holding the three .deb files, the zip and SHA256SUMS.
+# Nothing is published anywhere: review the draft and press "Publish release" yourself, then upload the zip to PGXN.
+#
+# Run it by hand (Actions > release > Run workflow) for a dry run: steps 1-3 only, the files as workflow artifacts.
+name: release
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  check:
+    runs-on: [self-hosted, Linux, X64, local]
+    timeout-minutes: 10
+    outputs:
+      version: ${{ steps.v.outputs.version }}
+    steps:
+      - uses: actions/checkout@v5
+      - id: v
+        name: version
+        run: |
+          if [ "${GITHUB_REF_TYPE}" = tag ]; then V=${GITHUB_REF_NAME#v}; else V=$(python3 -c 'import json;print(json.load(open("META.json"))["version"])'); fi
+          echo "version=$V" >> "$GITHUB_OUTPUT"
+          echo "Trigpoint $V"
+      - name: the version is the same everywhere
+        run: sh scripts/check_version.sh "${{ steps.v.outputs.version }}"
+
+  packages:
+    name: package and test (PG ${{ matrix.pg }})
+    needs: check
+    runs-on: [self-hosted, Linux, X64, local]
+    timeout-minutes: 60
+    strategy:
+      fail-fast: true
+      matrix:
+        pg: [16, 17, 18]
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+      - name: venv
+        run: |
+          python -m venv .venv
+          .venv/bin/pip install -q "psycopg[binary]" numpy pytest
+      - name: build the release image and .deb, run the quick suites on it
+        env:
+          PG_MAJOR: ${{ matrix.pg }}
+          WHICH: release
+          PORT: "0"
+          CI_NAME: tp-rel-${{ github.run_id }}-${{ matrix.pg }}
+          TAG_SUFFIX: -rel${{ github.run_id }}
+          CI_CLEAN: "1"
+          TP_TEST_SLOW: "2"   # both runners share one machine: the time bounds of the tests x2
+          ARCHFLAGS: -march=x86-64-v3
+        run: |
+          rm -rf dist
+          sh scripts/ci_release.sh
+          ls -l dist/postgresql-${PG_MAJOR}-trigpoint_${{ needs.check.outputs.version }}_amd64.deb
+      - uses: actions/upload-artifact@v4
+        with:
+          name: deb-pg${{ matrix.pg }}
+          path: dist/*.deb
+          if-no-files-found: error
+
+  pgxn:
+    needs: check
+    runs-on: [self-hosted, Linux, X64, local]
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v5
+      - name: PGXN zip
+        run: |
+          rm -rf dist
+          sh scripts/pgxn_dist.sh "${{ needs.check.outputs.version }}"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: pgxn
+          path: dist/trigpoint-${{ needs.check.outputs.version }}.zip
+          if-no-files-found: error
+
+  release:
+    name: draft GitHub release
+    if: github.ref_type == 'tag'
+    needs: [check, packages, pgxn]
+    runs-on: [self-hosted, Linux, X64, local]
+    timeout-minutes: 10
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/download-artifact@v4
+        with:
+          path: out
+          merge-multiple: true
+      - name: checksums and notes
+        run: |
+          cd out && sha256sum * > SHA256SUMS && cat SHA256SUMS && cd ..
+          V=${{ needs.check.outputs.version }}; MM=$(echo "$V" | cut -d. -f1,2)
+          {
+            echo "Trigpoint $V: a vector index access method for pgvector vectors (PostgreSQL 16, 17 and 18)."
+            echo
+            echo "## Install"
+            echo
+            echo '- Debian/Ubuntu with the PGDG packages: `sudo apt install ./postgresql-17-trigpoint_'"$V"'_amd64.deb` (needs `postgresql-17` and `postgresql-17-pgvector` >= 0.8; use the file for your PostgreSQL major). Built for x86-64-v3 (AVX2 + FMA).'
+            echo '- From source / PGXN: unzip `trigpoint-'"$V"'.zip`, then `make && sudo make install` (needs `pg_config` and a C++17 compiler).'
+            echo '- Then: `CREATE EXTENSION vector; CREATE EXTENSION trigpoint;`'
+            echo
+            echo "## Changes"
+            echo
+            awk -v mm="$MM" '$0 ~ "^## "mm"( |$)" {on=1; next} on && /^## / {exit} on' CHANGELOG.md
+          } > notes.md
+      - uses: softprops/action-gh-release@v2
+        with:
+          draft: true
+          name: Trigpoint ${{ needs.check.outputs.version }}
+          body_path: notes.md
+          files: |
+            out/*.deb
+            out/*.zip
+            out/SHA256SUMS

@@ -3,6 +3,7 @@ order must be the brute-force cosine order at exact = on, approximate recall mus
 a compaction and REINDEX must keep it, and the planner must use the index for ORDER BY v <=> q.
 """
 
+import os
 import struct
 
 import numpy as np
@@ -18,7 +19,7 @@ D = 48
 def _connect():
     try:
         c = psycopg.connect(autocommit=True, connect_timeout=3)
-        c.execute("SET statement_timeout = '%ds'" % (300 * (5 if 'sanitizer build' in c.execute('SELECT version()').fetchone()[0] else 1)))
+        c.execute("SET statement_timeout = '%ds'" % int(300 * (5 if 'sanitizer build' in c.execute('SELECT version()').fetchone()[0] else 1) * float(os.environ.get('TP_TEST_SLOW', '1'))))
         c.execute("SET client_min_messages = warning")
         return c
     except Exception as e:  # noqa: BLE001

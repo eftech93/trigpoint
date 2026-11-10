@@ -3,6 +3,7 @@ ERROR; the module connection must survive every case (a crash would drop it), an
 survives a case passes trigpoint_check(deep).
 """
 
+import os
 import struct
 
 import numpy as np
@@ -16,7 +17,7 @@ from test_pg_extension import _corpus, _lit  # noqa: E402
 def _connect():
     try:
         c = psycopg.connect(autocommit=True, connect_timeout=3)
-        c.execute("SET statement_timeout = '%ds'" % (120 * (5 if 'sanitizer build' in c.execute('SELECT version()').fetchone()[0] else 1)))
+        c.execute("SET statement_timeout = '%ds'" % int(120 * (5 if 'sanitizer build' in c.execute('SELECT version()').fetchone()[0] else 1) * float(os.environ.get('TP_TEST_SLOW', '1'))))
         c.execute("SET client_min_messages = warning")
         return c
     except Exception as e:  # noqa: BLE001

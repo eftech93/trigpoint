@@ -8,6 +8,7 @@
 #   docker build -f docker/Dockerfile.release --build-arg PG_MAJOR=17 -t trigpoint/postgres:0.5-pg17 .
 #   docker build -f docker/Dockerfile.release --build-arg PG_MAJOR=17 --target deb -o dist .     # the .deb alone
 #   docker build -f docker/Dockerfile.release --build-arg TEST_HOOKS=1 -t trigpoint-postgres-test:pg17 .   # for the suites
+#   --build-arg ARCHFLAGS=-march=x86-64-v3   # a package for other x86-64 machines (default: -march=native)
 ARG PG_MAJOR=17
 # The base images are pinned by digest: the tag pgvector/pgvector:pg<m> is rebuilt upstream, and two builds of the same
 # tree on different digests gave different indexes (most likely through the toolchain).
@@ -25,9 +26,16 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 WORKDIR /src
 COPY csrc /src/csrc
 COPY pgext /src/pgext
-RUN test -d csrc/hnswlib/hnswlib || git clone --depth 1 -q https://github.com/nmslib/hnswlib csrc/hnswlib
-RUN make -C pgext with_llvm=no CXX=clang++ TEST_HOOKS=${TEST_HOOKS} \
-    && make -C pgext install with_llvm=no DESTDIR=/out \
+# hnswlib is header-only and pinned to the commit 0.5 was tested with (master on 2026-11-04); a source tree that
+# already holds it (the PGXN zip) keeps its copy.
+ARG HNSWLIB_REF=ca426729609b3221563047ceb269cc1213e0d376
+RUN test -d csrc/hnswlib/hnswlib || { git clone -q https://github.com/nmslib/hnswlib csrc/hnswlib \
+        && git -C csrc/hnswlib checkout -q ${HNSWLIB_REF}; }
+# ARCHFLAGS: empty = -march=native for the build machine; packages for other machines pass a portable target
+# (the release workflow: -march=x86-64-v3 on amd64).
+ARG ARCHFLAGS=
+RUN make -C pgext with_llvm=no CXX=clang++ TEST_HOOKS=${TEST_HOOKS} ${ARCHFLAGS:+ARCHFLAGS="${ARCHFLAGS}"} \
+    && make -C pgext install with_llvm=no DESTDIR=/out ${ARCHFLAGS:+ARCHFLAGS="${ARCHFLAGS}"} \
     && rm -rf /out/usr/include
 # the package: everything `make install` put under /out, a control file, the licence and the changelog
 RUN ARCH=$(dpkg --print-architecture) && PKG=postgresql-${PG_MAJOR}-trigpoint && D=/deb/${PKG}_${VERSION}_${ARCH} \

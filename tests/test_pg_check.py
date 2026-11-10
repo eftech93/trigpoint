@@ -50,7 +50,7 @@ def conn():
         cur.execute("CREATE EXTENSION IF NOT EXISTS trigpoint")
     except Exception as e:  # noqa: BLE001
         pytest.skip(f"trigpoint extension not installed: {e}")
-    cur.execute("SET statement_timeout = '%ds'" % (120 * (5 if 'sanitizer build' in cur.execute('SELECT version()').fetchone()[0] else 1)))  # a hang is a failure, not a wait (the barrier bug of 2026-10-28)
+    cur.execute("SET statement_timeout = '%ds'" % int(120 * (5 if 'sanitizer build' in cur.execute('SELECT version()').fetchone()[0] else 1) * float(os.environ.get('TP_TEST_SLOW', '1'))))  # a hang is a failure, not a wait (the barrier bug of 2026-10-28)
     cur.execute("SELECT extversion FROM pg_extension WHERE extname = 'trigpoint'")
     if cur.fetchone()[0] < "0.3":
         pytest.skip("trigpoint < 0.3 has no trigpoint_check")
