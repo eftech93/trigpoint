@@ -1,5 +1,5 @@
 # Trigpoint CI, on the project's self-hosted runners (labels: self-hosted, Linux, X64, local; they need Docker and
-# Python 3). On push and pull request: the test image on PostgreSQL 16, 17 and 18 and the release image on 17, each
+# Python 3). On push and pull request: the test image and the release image (x86-64-v3) on PostgreSQL 16, 17 and 18, each
 # running the quick suites against a throwaway server (scripts/ci_release.sh). Nightly: the same plus the soak, crash
 # and standby runs. Each job uses its own container name, port and image tags, and removes them when it ends.
 #
@@ -37,7 +37,11 @@ jobs:
             which: test
           - pg: 18
             which: test
+          - pg: 16
+            which: release
           - pg: 17
+            which: release
+          - pg: 18
             which: release
     steps:
       - uses: actions/checkout@v5
