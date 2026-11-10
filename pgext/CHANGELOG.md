@@ -13,6 +13,9 @@ PostgreSQL major.
   `trigpoint.max_scan_tuples` (20,000), `trigpoint.max_probes` (0). A scan goes on in batches when the executor asks for
   more than its first k rows (a `WHERE` above the index, a `LIMIT` above `trigpoint.k`): k and the cells opened double,
   the routed order is kept, no heap row is fetched twice.
+- Test builds only (`TEST_HOOKS=1`), for ablation studies: `trigpoint.debug_centroid_router` (rank cells by
+  centroid distance alone, no router graph) and `trigpoint.debug_ch` (0 = calibrated; a value in (0, 1] replaces the
+  tail cosines at every level, 1 = the exact bound over the probed cells). Release builds do not have them.
 - Compaction returns its space: after the flip the new image is moved into the pages the retired generation freed and
   the relation is truncated after its last live page (`trigpoint.compact_reclaim`, on).
 - Security: every SQL helper that takes a `regclass` requires `SELECT` on the indexed table (`trigpoint_check(…, true)`

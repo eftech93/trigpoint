@@ -1144,8 +1144,12 @@ tp_compute(IndexScanDesc scan)
 
 	if (tp_exact)
 		;						/* certificate: exact bound (ch = 1) over every cell */
+	else if (tp_debug_ch > 0)
+		ch[0] = ch[1] = ch[2] = ch[3] = (float) tp_debug_ch;	/* ablation: an uncalibrated relaxation */
 	else
 		tp_index_ch(c->ix, tp_delta, ch);
+	if (tp_debug_centroid_router)
+		M = 0;					/* ablation: no router hits, every cell ranked by centroid (append_rest_cells) */
 
 	INSTR_TIME_SET_CURRENT(t_now);
 	if (so->sc == NULL)

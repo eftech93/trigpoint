@@ -224,11 +224,15 @@ extern bool tp_debug;
 #ifdef TRIGPOINT_TEST_HOOKS
 extern bool tp_debug_skip_heap;	/* test builds only: these change results */
 extern bool tp_debug_no_delta_graph;
+extern bool tp_debug_centroid_router;
+extern double tp_debug_ch;
 extern int	tp_debug_load_sleep_ms;
 extern bool tp_debug_load_fatal;
 #else
 #define tp_debug_skip_heap false
 #define tp_debug_no_delta_graph false
+#define tp_debug_centroid_router false
+#define tp_debug_ch 0.0
 #define tp_debug_load_sleep_ms 0
 #define tp_debug_load_fatal false
 #endif
