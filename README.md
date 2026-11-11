@@ -7,16 +7,51 @@ and cosine (`<=>`) operator classes. Version 0.5; `CHANGELOG.md` lists the relea
 
 ## Install
 
-From the release image or the .deb (`docker/Dockerfile.release`; `sh scripts/ci_release.sh` builds and tests both):
+Trigpoint needs PostgreSQL 16, 17 or 18 and pgvector 0.8 or later. Releases: https://github.com/eftech93/trigpoint/releases
+and https://pgxn.org/dist/trigpoint/.
 
-```
-docker build -f docker/Dockerfile.release --build-arg PG_MAJOR=17 -t trigpoint/postgres:0.5-pg17 .   # pgvector's image + the extension
-docker build -f docker/Dockerfile.release --build-arg PG_MAJOR=17 --target deb -o dist .            # dist/postgresql-17-trigpoint_0.5.0_<arch>.deb
-dpkg -i dist/postgresql-17-trigpoint_0.5.0_*.deb          # on a host with postgresql-17 and postgresql-17-pgvector
-```
+- **PGXN** (builds from source: `pg_config` of the target server on the PATH and a C++17 compiler; the build is tuned
+  for the machine's CPU):
 
-From source: `make -C pgext && make -C pgext install` against `pg_config` of the target major (a C++17 compiler for the
-core; `csrc/hnswlib` is cloned by the Dockerfile, or `git clone https://github.com/nmslib/hnswlib csrc/hnswlib`).
+  ```
+  pip install pgxnclient
+  pgxn install vector          # pgvector, if it is not installed yet
+  pgxn install trigpoint
+  ```
+
+- **Debian/Ubuntu package** from the GitHub release, for the PGDG packages of your major (x86-64 with AVX2 and FMA,
+  i.e. Haswell or later):
+
+  ```
+  wget https://github.com/eftech93/trigpoint/releases/download/v0.5.0/postgresql-17-trigpoint_0.5.0_amd64.deb
+  sudo apt install ./postgresql-17-trigpoint_0.5.0_amd64.deb      # needs postgresql-17 and postgresql-17-pgvector
+  ```
+
+- **Docker**: pgvector's official image plus the extension, no compiler inside, on GitHub's container registry
+  (`0.5.0-pg16`, `0.5.0-pg17`, `0.5.0-pg18`; `pg16`/`pg17`/`pg18` and `latest` = pg17 follow the newest release):
+
+  ```
+  docker run -d --name trigpoint -e POSTGRES_PASSWORD=secret -p 5432:5432 --shm-size 1g ghcr.io/eftech93/trigpoint:0.5.0-pg17
+  ```
+
+  Or build it (`PG_MAJOR` 16, 17 or 18); the same Dockerfile also produces the .deb:
+
+  ```
+  docker build -f docker/Dockerfile.release --build-arg PG_MAJOR=17 -t trigpoint/postgres:0.5-pg17 .
+  docker build -f docker/Dockerfile.release --build-arg PG_MAJOR=17 --target deb -o dist .     # dist/*.deb
+  ```
+
+- **From a git checkout**: hnswlib (header-only) goes into `csrc/hnswlib` at the commit the release was tested with, then
+  the top-level Makefile builds and installs the extension (`ARCHFLAGS=-march=x86-64-v3` for a build that runs on
+  other x86-64 machines; the default is `-march=native`):
+
+  ```
+  git clone https://github.com/nmslib/hnswlib csrc/hnswlib
+  git -C csrc/hnswlib checkout ca426729609b3221563047ceb269cc1213e0d376
+  make && sudo make install
+  ```
+
+Then, in each database:
 
 ```
 CREATE EXTENSION vector;
@@ -35,8 +70,8 @@ PostgreSQL versions: 17 and 18 need nothing else. On 16 the cluster-wide image r
 `trigpoint.shared_image`) exists only with `shared_preload_libraries = 'trigpoint'`; without the preload the extension
 works unchanged but every backend keeps a private copy of each image it opens (one image's worth of memory per
 backend, slower first queries), `trigpoint_shared()` is empty and `trigpoint_shared_available()` returns false.
-Build the image for a major with `PG_MAJOR=16|17|18` (`docker/Dockerfile.pg`); `sh scripts/ci_matrix.sh` runs the quick
-suites on all three (16 both ways).
+Build the image for a major with `PG_MAJOR=16|17|18` (`docker/Dockerfile.release`); `PG_MAJOR=16 sh scripts/ci_release.sh`
+runs the quick suites on that major.
 
 Reloptions: `cells` (0 = automatic), `levels` (e.g. `'32,96,256'`), `m` and `ef_construction` (router graph),
 `sample`, `kmeans_iters`, `calibration_queries`, `seed`.
@@ -88,11 +123,11 @@ Reloptions: `cells` (0 = automatic), `levels` (e.g. `'32,96,256'`), `m` and `ef_
   and `pg_cancel_backend` stop a build, an exact scan, a compaction VACUUM and a deep check within the timeout plus the
   current cell or page (`tests/test_pg_cancel.py`); a backend terminated while it loads a shared image publishes its
   whole entry or leaves none (`tests/test_pg_shared_cap.py`).
-- Dumps: `pg_dump` stores the CREATE INDEX statement; the image is rebuilt on restore (`scripts/pg_upgrade_test.sh dump`
-  checks the round trip: counts, validity, the checker, identical exact answers).
+- Dumps: `pg_dump` stores the CREATE INDEX statement; the image is rebuilt on restore (the round trip
+  was tested: counts, validity, the checker, identical exact answers).
 - On-disk format: page format 3 is read by every 0.x and 1.x release and is the same on every PostgreSQL major (fixed-width
   page structs, no PostgreSQL-version-dependent layout), so `pg_upgrade` carries a trigpoint index across majors without a
-  REINDEX (`scripts/pg_upgrade_test.sh upgrade` runs 17 -> 18 in `docker/Dockerfile.upgrade`: same pages, checker clean,
+  REINDEX (tested from 17 to 18: same pages, checker clean,
   same answers). A reader refuses any other format with a REINDEX hint; a future bump ships an in-place migration or a
   documented REINDEX. `ALTER EXTENSION trigpoint UPDATE` changes the catalog only, one step at a time from 0.2
   (`tests/test_pg_upgrade.py`).
@@ -109,7 +144,8 @@ Reloptions: `cells` (0 = automatic), `levels` (e.g. `'32,96,256'`), `m` and `ef_
 
 ## Tests
 
-`sh scripts/ci.sh` builds the local Docker image and runs every suite (`tests/test_pg_*.py`, the filtered-scan suite
-among them) plus the short soak, crash and standby
-scripts; `--quick` runs the pytest suites only; `SANITIZE=1` builds the ASan/UBSan image (PostgreSQL itself compiled from
-source with the sanitizers and assertions, pgvector and the extension against it; several times slower).
+`sh scripts/ci_release.sh` builds the test image (page hooks compiled in) and the release image for one major
+(`PG_MAJOR=16|17|18`, `WHICH=test|release|both`) and runs the quick suites (`tests/test_pg_*.py`) against a throwaway
+server; it needs Docker and a venv with psycopg, numpy and pytest. `tests/pg_soak.py`, `tests/pg_crash.py` and
+`tests/pg_standby.py` are the longer soak, crash-recovery and standby runs. CI runs the suites on every major for both
+images; a tag `vX.Y.Z` builds and tests the packages and drafts the GitHub release.

@@ -6,7 +6,8 @@
 - A fresh 0.5 is up to date (ALTER EXTENSION UPDATE is a no-op and the catalog's version is the default).
 - REINDEX INDEX CONCURRENTLY and CREATE INDEX CONCURRENTLY under a concurrent writer that inserts and deletes:
   the new index is valid, holds every surviving row inserted meanwhile and none of the deleted ones.
-The pg_dump round trip and pg_upgrade 17 -> 18 need the client and server binaries: scripts/pg_upgrade_test.sh.
+The pg_dump round trip and pg_upgrade 17 -> 18 need the client and server binaries of both majors; they are tested
+outside this suite.
 """
 import struct
 import threading
