@@ -9,15 +9,9 @@ is the order an operator meets things in.
 
 ## 1. Install
 
-Three ways, all producing the same extension:
-
-- **Release image**: `docker build -f docker/Dockerfile.release --build-arg PG_MAJOR=17 -t trigpoint/postgres:0.5-pg17 .`
-  gives pgvector's official image plus the extension, no compiler inside. `PG_MAJOR` is 16, 17 or 18.
-- **Debian package**: `docker build -f docker/Dockerfile.release --build-arg PG_MAJOR=17 --target deb -o dist .` leaves
-  `dist/postgresql-17-trigpoint_0.5.0_<arch>.deb`; `dpkg -i` it on a host that has `postgresql-17` and
-  `postgresql-17-pgvector` (0.8 or later).
-- **From source**: `make -C pgext && make -C pgext install` with `pg_config` of the target major on the PATH; a C++17
-  compiler for the core and `csrc/hnswlib` (header-only, cloned from github.com/nmslib/hnswlib).
+The ways to install (PGXN, the Debian/Ubuntu package from the GitHub release, the Docker image, a git checkout) are in
+the README's Install section; all produce the same extension. The release packages are built for x86-64-v3 (AVX2 and
+FMA); a source build is tuned for the machine it runs on.
 
 Then, in each database:
 
