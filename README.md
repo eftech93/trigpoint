@@ -27,8 +27,14 @@ and https://pgxn.org/dist/trigpoint/.
   sudo apt install ./postgresql-17-trigpoint_0.5.0_amd64.deb      # needs postgresql-17 and postgresql-17-pgvector
   ```
 
-- **Docker**: pgvector's official image plus the extension, no compiler inside (`PG_MAJOR` 16, 17 or 18); the same
-  Dockerfile also produces the .deb:
+- **Docker**: pgvector's official image plus the extension, no compiler inside, on GitHub's container registry
+  (`0.5.0-pg16`, `0.5.0-pg17`, `0.5.0-pg18`; `pg16`/`pg17`/`pg18` and `latest` = pg17 follow the newest release):
+
+  ```
+  docker run -d --name trigpoint -e POSTGRES_PASSWORD=secret -p 5432:5432 --shm-size 1g ghcr.io/eftech93/trigpoint:0.5.0-pg17
+  ```
+
+  Or build it (`PG_MAJOR` 16, 17 or 18); the same Dockerfile also produces the .deb:
 
   ```
   docker build -f docker/Dockerfile.release --build-arg PG_MAJOR=17 -t trigpoint/postgres:0.5-pg17 .

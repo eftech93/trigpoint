@@ -1,0 +1,101 @@
+# Trigpoint Docker images on GitHub's container registry: ghcr.io/eftech93/trigpoint.
+#
+# Runs when a release is published, or by hand (Actions > docker > Run workflow) for an existing tag, e.g. v0.5.0.
+# For PostgreSQL 16, 17 and 18 it builds the release image from that tag (pgvector's official image plus the
+# extension, x86-64-v3: AVX2 + FMA), runs the quick suites against it, and pushes:
+#   <version>-pg16, <version>-pg17, <version>-pg18
+#   pg16, pg17, pg18 and latest (= pg17) when "latest" is set (a published release that is not a pre-release)
+# The registry login lives in a temporary Docker config, removed at the end with this run's images.
+name: docker
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Release tag to build, e.g. v0.5.0"
+        required: true
+      latest:
+        description: "Also move the pg16/pg17/pg18 and latest tags"
+        type: boolean
+        default: true
+
+permissions:
+  contents: read
+
+concurrency:
+  group: docker-${{ github.event.release.tag_name || inputs.tag }}
+  cancel-in-progress: false
+
+jobs:
+  image:
+    name: image (PG ${{ matrix.pg }})
+    runs-on: [self-hosted, Linux, X64, local]
+    timeout-minutes: 90
+    permissions:
+      contents: read
+      packages: write
+    strategy:
+      fail-fast: false
+      matrix:
+        pg: [16, 17, 18]
+    env:
+      TAG: ${{ github.event.release.tag_name || inputs.tag }}
+      LATEST: ${{ (github.event_name == 'release' && !github.event.release.prerelease) || (github.event_name == 'workflow_dispatch' && inputs.latest) }}
+      IMAGE: ghcr.io/eftech93/trigpoint
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          ref: ${{ env.TAG }}
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+      - name: venv
+        run: |
+          python -m venv .venv
+          .venv/bin/pip install -q "psycopg[binary]" numpy pytest
+      - name: build the release image and run the quick suites on it
+        env:
+          PG_MAJOR: ${{ matrix.pg }}
+          WHICH: release
+          PORT: "0"
+          CI_NAME: tp-img-${{ github.run_id }}-${{ matrix.pg }}
+          TAG_SUFFIX: -img${{ github.run_id }}
+          CI_CLEAN: "0"
+          TP_TEST_SLOW: "2"   # both runners share one machine
+          ARCHFLAGS: -march=x86-64-v3
+        run: sh scripts/ci_release.sh
+      - name: label, tag and push
+        env:
+          PG_MAJOR: ${{ matrix.pg }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -e
+          V=${TAG#v}
+          export DOCKER_CONFIG=$RUNNER_TEMP/docker-config-$PG_MAJOR; mkdir -p "$DOCKER_CONFIG"
+          # the image scripts/ci_release.sh built and tested in this job (its tag names the version series and this run)
+          SRC=$(docker images --format '{{.Repository}}:{{.Tag}}' trigpoint/postgres | grep -- "-pg$PG_MAJOR-img${{ github.run_id }}$" | head -1)
+          [ -n "$SRC" ] || { echo "no tested image for PG $PG_MAJOR in this run"; exit 1; }
+          echo "tested image: $SRC"
+          # the source label links the package to the repository; built on top of the tested image, nothing recompiled
+          printf 'FROM %s\nLABEL org.opencontainers.image.source="https://github.com/eftech93/trigpoint" org.opencontainers.image.version="%s" org.opencontainers.image.licenses="PostgreSQL" org.opencontainers.image.description="PostgreSQL %s with pgvector and Trigpoint %s (x86-64-v3)"\n' \
+            "$SRC" "$V" "$PG_MAJOR" "$V" | docker build -q -t "$IMAGE:$V-pg$PG_MAJOR" -
+          TAGS="$IMAGE:$V-pg$PG_MAJOR"
+          if [ "$LATEST" = true ]; then
+            docker tag "$IMAGE:$V-pg$PG_MAJOR" "$IMAGE:pg$PG_MAJOR"; TAGS="$TAGS $IMAGE:pg$PG_MAJOR"
+            if [ "$PG_MAJOR" = 17 ]; then docker tag "$IMAGE:$V-pg$PG_MAJOR" "$IMAGE:latest"; TAGS="$TAGS $IMAGE:latest"; fi
+          fi
+          echo "$GH_TOKEN" | docker login ghcr.io -u "${{ github.actor }}" --password-stdin
+          for t in $TAGS; do docker push -q "$t"; echo "pushed $t"; done
+      - name: clean up
+        if: always()
+        env:
+          PG_MAJOR: ${{ matrix.pg }}
+        run: |
+          export DOCKER_CONFIG=$RUNNER_TEMP/docker-config-$PG_MAJOR
+          docker logout ghcr.io >/dev/null 2>&1 || true
+          rm -rf "$DOCKER_CONFIG"
+          V=${TAG#v}
+          docker rmi "$IMAGE:$V-pg$PG_MAJOR" "$IMAGE:pg$PG_MAJOR" >/dev/null 2>&1 || true
+          docker images --format '{{.Repository}}:{{.Tag}}' | grep -- "-pg$PG_MAJOR-img${{ github.run_id }}$" | xargs -r docker rmi >/dev/null 2>&1 || true
+          [ "$PG_MAJOR" = 17 ] && docker rmi "$IMAGE:latest" >/dev/null 2>&1 || true
